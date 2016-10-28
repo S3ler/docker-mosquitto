@@ -1,13 +1,15 @@
-version: '2'
+version: '1'
 
 services:
-        redis:
-                image: redis:3
+        mysql:
+                image: mysql:latest
                 volumes:
-                - ${PWD}/tmp/data:/data
+                - ${PWD}/mysql:/var/lib/mysql
                 ports:
-                - "6379"
-                container_name: "redis-mosq"
+                - "3306"
+                container_name: "mysql-mosq"
+		environment:
+		- MYSQL_ROOT_PASSWORD=mypassword
                 networks:
                 - mosqnet
 
@@ -18,17 +20,14 @@ services:
                 ports:
                 - "1883:1883"
                 - "9883:9883"
-                environment:
-                - DOMAIN=example.local
-                - PORT=8080
                 networks:
                 - mosqnet
                 depends_on:
-                - redis
+                - mysql
                 labels:
                 - "local.example.description=Mosquitto v1.4.10 MQTT server"
-#                links:
-#                - redis:mosquitto.redis.link
+
 
 networks:
         mosqnet:
+
