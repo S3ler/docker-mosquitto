@@ -3,37 +3,40 @@ docker-mosquitto
 
 Mosquitto MQTT Broker on Docker Image.
 
+This is a fork from [jllopis/docker-mosquitto](https://github.com/jllopis/docker-mosquitto) instead of using `Redis` and `http` it is compiled with the `MySQL` backend.
+
 # Version
 
 **mosquitto** v1.4.10
 
 This version implement MQTT over WebSocket. You can use an MQTT JavaScript library to connect, like Paho: https://github.com/eclipse/paho.mqtt.javascript
 
-It has the auth plugin `https://github.com/jpmens/mosquitto-auth-plug` included. It uses (and is compiled with) support for a `Redis` and `http` backends. The additional config for this plugin (sample `auth-plugin.conf` included) can be bind mounted in the extended configuration directory: `/etc/mosquitto.d`. Any file with a `.conf` extension will be loaded by `mosquitto` on startup.
+It has the auth plugin `https://github.com/jpmens/mosquitto-auth-plug` included. It uses (and is compiled with) support for a `MySQL` backend. The additional config for this plugin (sample `auth-plugin.conf` included) can be bind mounted in the extended configuration directory: `/etc/mosquitto.d`. Any file with a `.conf` extension will be loaded by `mosquitto` on startup.
 
 For details on the auth plugin configuration, refer to the author repository. A little quick&dirty example its included at the end.
 
 The docker images builds with Official Alpine Linux 3.4.
 
+
 # Build
 
 Use the provide _Makefile_ to build the image.
 
-Alternatively you can start it by means of [docker-compose](https://docs.docker.com/compose): `docker-compose up`. This is useful when testing. It start up _redis_ and link it to _mosquitto_ so you can test the _auth-plugin_ easily.
+Alternatively you can start it by means of [docker-compose](https://docs.docker.com/compose): `docker-compose up`. This is useful when testing. It start up _mysql_ and link it to _mosquitto_ so you can test the _auth-plugin_ easily.
 
 ## Build the Mosquitto docker image
 
-    $ sudo make
+    $ sudo make image-mosq
 
 You can specify your repository and tag by
 
     $ sudo make REPOSITORY=my_own_repo/mqtt TAG=v1.4.10
 
-Default for **REPOSITORY** is **jllopis/mosquitto** (should change this) and for **TAG** is **mosquitto version (1.4.10 now)**.
+Default for **REPOSITORY** is **s3ler/mosquitto** (should change this) and for **TAG** is **mosquitto version (1.4.10 now)**.
 
 Actually the command executed by make is
 
-    docker build --no-cache -t jllopis/mosquitto:v1.4.10 .
+    docker build --no-cache -t s3ler/mosquitto:v1.4.10 .
 
 # Persistence and Configuration
 
@@ -48,7 +51,7 @@ The container has three directories that you can use:
 - **/var/lib/mosquitto** to persist the database
 
 The logger outputs to **stderr** by default.
-)
+
 See the following examples for some guidance:
 
 ## Mapping host directories
@@ -61,7 +64,7 @@ See the following examples for some guidance:
       --name mqtt \
       -p 1883:1883 \
       -p 9883:9883 \
-      jllopis/mosquitto:v1.4.10
+      s3ler/mosquitto:v1.4.10
 
 ## Data Only Containers
 
@@ -76,98 +79,154 @@ and then just use **VOLUMES_FROM** in your container:
       --name mqtt \
       -p 1883:1883 \
       -p 9883:9883 \
-      jllopis/mosquitto:v1.4.10
+      s3ler/mosquitto:v1.4.10
 
-The image will save its auth data (if configured) to _redis_. You can start and link a _redis_ container or use an existing _redis_ instance (remember to configure the plugin).
+The image will save its auth data (if configured) to _mysql_. You can start and link a _mysql_ container or use an existing _mysql_ instance (remember to reconfigure the _auth-plugin.conf_ file, especially change the example logins).
 
 The included `docker-compose.yml` file is a good example of how to do it.
 
 # Example of authenticated access
 
-By default, there is an `admin` superuser added to `auth-plugin.conf`. We will use it as an example.
+By default, there is an `root` superuser added to `auth-plugin.conf` with `mypassword` as root-password.
+For further configuration of the mysql container take a look at the [MySQL Docker Container Basics](http://severalnines.com/blog/mysql-docker-containers-understanding-basics) and/or the [MySQL Official Docker Hub Repository](https://hub.docker.com/_/mysql/).
+The database schema layout is taken from the [mosquitto-aut-plug example](https://github.com/jpmens/mosquitto-auth-plug/blob/master/examples/mosquitto-mysql.conf).
 
-## 1. Start a Redis instance
+These steps are automated in the `make` file.
 
-    $ sudo docker run -d \
-      --name redis_1 \
-      -p 6379 \
-      -v ${PWD}/tmp/redis-data:/data
-      redis:3
+We will use it as an example.
 
-## 2. Start mosquitto with the linked redis
+## 1. Create the [container network](https://docs.docker.com/engine/userguide/networking/)
 
-    $ sudo docker run -d \
-      -v ${PWD}/mosquitto/etc/mosquitto:/etc/mosquitto \
-      -v ${PWD}/mosquitto/etc/mosquitto.d:/etc/mosquitto.d \
-      -v ${PWD}/mosquitto/var/lib/mosquitto:/var/lib/mosquitto
-      -v ${PWD}/mosquitto/auth-plug.conf:/etc/mosquitto.d/auth-plugin.conf
-      --name mqtt \
-      -p 1883:1883 \
-      -p 9883:9883 \
-      --link redis:mosquitto.redis.link \
-      jllopis/mosquitto:v1.4.10
+    $ docker network create mosqnet
 
-## 3. Add a password for the admin user
+or
 
-(or whatever user u have configured...)
+    $ make create-mosqnet
 
-    $ docker run -ti --rm jllopis/mosquitto:v1.4.10 np -p secretpass
-    PBKDF2$sha256$901$5nH8dWZV5NXTI63/$0n3XrdhMxe7PedKZUcPKMd0WHka4408V
+## 2. Start a [MySQL instance](https://hub.docker.com/_/mysql/)
 
-    $ docker run -it --link redis_1:redis --rm redis sh -c 'exec redis-cli -h "$REDIS_PORT_6379_TCP_ADDR" -p "$REDIS_PORT_6379_TCP_PORT"'
-    172.17.0.64:6379> SET admin PBKDF2$sha256$901$5nH8dWZV5NXTI63/$0n3XrdhMxe7PedKZUcPKMd0WHka4408V
-    OK
-    172.17.0.64:6379> QUIT
+    $ docker run --detach \
+      --name=mysql-mosq \
+      --env="MYSQL_ROOT_PASSWORD=mypassword" \
+      -v ${PWD}/mysql:/var/lib/mysql \
+      --net=mosqnet \
+      mysql:latest
 
-## 4. Subscribe to a test channel
+or
 
-    $ mosquitto_sub -h localhost -t test
+    $ make run-db
 
-## 5. Publish to test channel
+## 3. Create database and schema
+
+    $ IPAddress=$(sudo docker inspect mysql-mosq | grep -m3 IPAddress | tail -n1 | cut -d '"' -f 4)
+    $ mysql -uroot -pmypassword -h${IPAddress} -P3306 < mosq_db.conf
+
+or
+
+    $ make create-db
+
+## 4. Build Mosquitto image with MySQL backend
+
+    $ docker build --noch-cache -t s3ler/mosquitto:v1.4.10 .
+
+or
+
+    $ make image-mosq
+
+## 5. Start Mosquitto container with the linked MySQL
+
+    $ docker run --detach \
+      --name=auth-mosq \
+      -p 1883:1883 -p 9883:9883 \
+      -v ${PWD}/auth-plugin.conf:/etc/mosquitto.d/auth-plugin.conf \
+      --net=mosqnet \
+      s3ler/mosquitto:v1.4.10
+
+or
+
+    $ make run-mosq
+
+## 6. Add users to database
+
+Password hashes are generated via `np`.
+When you change the passwords in the users_example.conf `bash` file you need to escape $ by using \$ instead.
+
+    $ IPAddress=$(sudo docker inspect mysql-mosq | grep -m3 IPAddress | tail -n1 | cut -d '"' -f 4)
+    $ mysql -uroot -pmypassword -h$IPAddress -P3306
+    $ USE mosq;
+    $ # insert users
+    $ INSERT INTO users (username, pw) VALUES ('jjolie', 'PBKDF2$sha256$901$YR1fzF00XJvYlWhJ$qJMliJ/cOCfGJrDWG7ZigFw5XlJ6822D');
+    $ INSERT INTO users (username, pw, super) VALUES ('S1', 'PBKDF2$sha256$901$EggwHLVb+LGQD3ZO$9+lT7hh7LcO62ESVfqTacZQUf2Crz9Oi', 1);
+    $ # insert acls for jjolie
+    $ INSERT INTO acls (username, topic, rw) VALUES ('jjolie', 'loc/lastloc/jjolie', 0);
+    $ INSERT INTO acls (username, topic, rw) VALUES ('jjolie', 'loc/jjolie', 1);
+    $ exit
+
+or
+
+    $ ./users_example.conf
+
+## 7. Subscribe to a test channel
+
+In a new terminal:
+
+    $ mosquitto_sub -h localhost -t loc/jjolie
+
+## 8. Publish to test channel
+
+In a new terminal:
+
+    $ sudo docker logs auth-mosq -f
+
+Publish in another terminal:
 
     $ mosquitto_pub -h localhost -t test -m "sample pub"
 
-And... nothing happens becouse our `anonymous` user have no permission on that channel. Check the _mosquitto_ logs:
+And... nothing happens because our `anonymous` user has no permission on that channel.
 
-    mosquitto_1 | 1437183848: New connection from 192.168.59.3 on port 1883.
-    mosquitto_1 | 1437183848: New client connected from 192.168.59.3 as mosqpub/14736-MacBook-P (c1, k60).
-    mosquitto_1 | 1437183848: Sending CONNACK to mosqpub/14736-MacBook-P (0, 0)
-    mosquitto_1 | 1437183848: |-- mosquitto_auth_acl_check(..., mosqpub/14736-MacBook-P, anonymous, test, MOSQ_ACL_WRITE)
-    mosquitto_1 | 1437183848: |-- user anonymous was authenticated in back-end 0 (redis)
-    mosquitto_1 | 1437183848: |-- aclcheck(anonymous, test, 2) AUTHORIZED=0 by redis
-    mosquitto_1 | 1437183848: |--  Cached  [9B6BD92B391C9366FC67942CE0020635A2E289AD] for (mosqpub/14736-MacBook-P,anonymous,2)
-    mosquitto_1 | 1437183848: |--  Cleanup [D45B453EA5A7900B66AD58FC314C28CD515C1572]
-    mosquitto_1 | 1437183848: Denied PUBLISH from mosqpub/14736-MacBook-P (d0, q0, r0, m0, 'test', ... (10 bytes))
-    mosquitto_1 | 1437183848: Received DISCONNECT from mosqpub/14736-MacBook-P
+Check the _mosquitto_ log terminal:
+
+    1477671741: New connection from 172.18.0.1 on port 1883.
+    1477671741: New client connected from 172.18.0.1 as mosqpub/14725-user-desk (c1, k60).
+    1477671741: Sending CONNACK to mosqpub/14725-user-desk (0, 0)
+    1477671741: |-- mosquitto_auth_acl_check(..., mosqpub/14725-user-desk, anonymous, test, MOSQ_ACL_WRITE)
+    1477671741: |-- aclcheck(anonymous, test, 2) AUTHORIZED=0 by (null)
+    1477671741: |--  Cached  [1C72B44ABD3A0F812672FE82CC15AE56FEFE1D97] for (mosqpub/14725-user-desk,anonymous,2)
+    1477671741: Denied PUBLISH from mosqpub/14725-use-desk (d0, q0, r0, m0, 'test', ... (10 bytes))
+    1477671741: Received DISCONNECT from mosqpub/14725-user-desk
+    1477671741: Client mosqpub/14725-user-desk disconnected.
+
 
 Cool!! Lets try again:
 
-    $ mosquitto_pub -h localhost -t test -m "sample pub" -u admin -P secretpass
+    $ mosquitto_pub -h localhost -t loc/jjolie -m "earth" -u jjolie -P secret
 
-see the logs:
 
-    mosquitto_1 | 1437183987: New connection from 192.168.59.3 on port 1883.
-    mosquitto_1 | 1437183987: |-- mosquitto_auth_unpwd_check(admin)
-    mosquitto_1 | 1437183987: |-- ** checking backend redis
-    mosquitto_1 | 1437183987: |-- getuser(admin) AUTHENTICATED=1 by redis
-    mosquitto_1 | 1437183987: New client connected from 192.168.59.3 as mosqpub/14767-MacBook-P (c1, k60, u'admin').
-    mosquitto_1 | 1437183987: Sending CONNACK to mosqpub/14767-MacBook-P (0, 0)
-    mosquitto_1 | 1437183987: |-- mosquitto_auth_acl_check(..., mosqpub/14767-MacBook-P, admin, test, MOSQ_ACL_WRITE)
-    mosquitto_1 | 1437183987: |-- aclcheck(admin, test, 2) GLOBAL SUPERUSER=Y
-    mosquitto_1 | 1437183987: |--  Cached  [CB67C9EA1CEA7676A1B3667076C142A05E1A6C94] for (mosqpub/14767-MacBook-P,admin,2)
-    mosquitto_1 | 1437183987: Received PUBLISH from mosqpub/14767-MacBook-P (d0, q0, r0, m0, 'test', ... (10 bytes))
-    mosquitto_1 | 1437183987: |-- mosquitto_auth_acl_check(..., mosqsub/14237-MacBook-P, anonymous, test, MOSQ_ACL_READ)
-    mosquitto_1 | 1437183987: |-- user anonymous was authenticated in back-end 0 (redis)
-    mosquitto_1 | 1437183987: |-- aclcheck(anonymous, test, 1) AUTHORIZED=0 by redis
-    mosquitto_1 | 1437183987: |--  Cached  [6E2BE05D56B509A1912C1A6921B4AEFE80A498CA] for (mosqsub/14237-MacBook-P,anonymous,1)
-    mosquitto_1 | 1437183987: Received DISCONNECT from mosqpub/14767-MacBook-P
+Check the _mosquitto_ log terminal again:
 
-Much better... But, did you get any output in the `mosquitto_sub`? None. Try this and replay:
+    1477672780: New connection from 172.18.0.1 on port 1883.
+    1477672780: |-- mosquitto_auth_unpwd_check(jjolie)
+    1477672780: |-- ** checking backend mysql
+    1477672780: |-- getuser(jjolie) AUTHENTICATED=1 by mysql
+    1477672780: New client connected from 172.18.0.1 as mosqpub/15067-user-desk (c1, k60, u'jjolie').
+    1477672780: Sending CONNACK to mosqpub/15067-user-desk (0, 0)
+    1477672780: |-- mosquitto_auth_acl_check(..., mosqpub/15067-user-desk, jjolie, loc/jjolie, MOSQ_ACL_WRITE)
+    1477672780: |--   mysql: topic_matches(loc/jjolie, loc/jjolie) == 1
+    1477672780: |-- aclcheck(jjolie, loc/jjolie, 2) trying to acl with mysql
+    1477672780: |-- aclcheck(jjolie, loc/jjolie, 2) AUTHORIZED=1 by mysql
+    1477672780: |--  Cached  [95B96203B13DB3E4B5554C56D229A9E10ABA7F7C] for (mosqpub/15067-user-desk,jjolie,2)
+    1477672780: |--  Cleanup [760CE6A777DF565A9BB1CAF9CED687567CBCF8D0]
+    1477672780: |--  Cleanup [1C72B44ABD3A0F812672FE82CC15AE56FEFE1D97]
+    1477672780: Received PUBLISH from mosqpub/15067-user-desk (d0, q0, r0, m0, 'loc/jjolie', ... (5 bytes))
+    1477672780: Received DISCONNECT from mosqpub/15067-user-desk
 
-    $ mosquitto_sub -h localhost -t test -u admin -P secretpass
+
+Much better... But, did you get any output in the first `mosquitto_sub` terminal? None. Try this and replay:
+
+    $ mosquitto_sub -h localhost -t loc/jjolie -u S1 -P supersecret
 
 And now everything *should* work! ;)
 
 ## Contributors
 
-- See [contributors page](https://github.com/jllopis/docker-mosquitto/graphs/contributors) for a list of contributors.
+- See [contributors page](https://github.com/jllopis/docker-mosquitto/graphs/contributors) for a list of contributors (including s3ler).
