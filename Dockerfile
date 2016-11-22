@@ -1,4 +1,4 @@
-FROM alpine:3.4
+FROM hypriot/rpi-alpine-scratch
 
 EXPOSE 1883
 EXPOSE 9883
@@ -12,6 +12,10 @@ ENV PATH=/usr/local/bin:/usr/local/sbin:$PATH
 ENV MOSQUITTO_VERSION=v1.4.10
 
 COPY run.sh /
+
+# solves: ERROR: unsatisfiable constraints:
+RUN echo http://nl.alpinelinux.org/alpine/v3.4/main >> /etc/apk/repositories 
+
 RUN buildDeps='git alpine-sdk openssl-dev libwebsockets-dev c-ares-dev util-linux-dev curl-dev libxslt docbook-xsl'; \
     chmod +x /run.sh && \
     mkdir -p /var/lib/mosquitto && \
