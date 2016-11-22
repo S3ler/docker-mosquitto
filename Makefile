@@ -25,7 +25,7 @@ run-db:
 	docker run --detach --name=mysql-mosq \
 	     --env="MYSQL_ROOT_PASSWORD=mypassword" \
 	     -v ${CURDIR}/mysql:/var/lib/mysql \
-	     --net=mosqnet mysql:latest
+	     --net=mosqnet hypriot/rpi-mysql
 
 image-mosq:
 	@echo "Building mosquitto image"
